@@ -1,0 +1,232 @@
+const {Client, LocalAuth, Buttons} = require('whatsapp-web.js')
+const qrcode = require('qrcode')
+const fs = require('fs')
+const socketIO = require('socket.io')
+const http = require('http')
+const express = require('express')
+const { error } = require('console')
+const path = require('path')
+
+const SESSION_FILE_PATH = './wtf-session.json'
+
+let sessionCfg
+if(fs.existsSync(SESSION_FILE_PATH)){
+    sessionCfg = require(SESSION_FILE_PATH)
+}
+
+const PORT = process.env.PORT || 8000
+const app = express()
+const server = http.createServer(app)
+const io = socketIO(server, {
+    // handlePreflightRequest: (req, res) => {
+    //     const headers = {
+    //         "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    //         "Access-Control-Allow-Origin": req.headers.origin, //or the specific origin you want to give access to,
+    //         "Access-Control-Allow-Credentials": true
+    //     };
+    //     res.writeHead(200, headers);
+    //     res.end();
+    // }
+    cors:{
+        origin: (_req, callback) => {
+            callback(null, true);
+        },
+        credentials: true
+    }
+})
+
+app.io = io
+
+const client = new Client({
+    authStrategy: new LocalAuth({
+        clientId: 'harmony-notif'
+    }),
+        puppeteer: {
+            headless: true,
+            args: [ 
+                '--no-sandbox', 
+                '--disable-gpu', 
+                '--disalbe-setupid-sandbox'
+            ],
+        },
+    webVersionCache:{
+        type: 'local',
+        // remotePath: "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html"
+    }
+})
+
+app.use(express.json())
+app.use(express.static(path.join(__dirname,'public')))
+app.use(express.urlencoded({extended:true}))
+app.get('/', (req,res)=>{
+    res.sendFile('index.html', {root: __dirname})
+})
+
+client.initialize()
+
+client.on('qr', (qr) => {
+    console.log('QR RECEIVED', qr);
+});
+
+client.on('message_create', async message => {
+    let user = await message.getContact()
+
+    if(message.body === "!ping"){
+        message.reply("Pong")
+    }else if(message.body === "skuy"){
+        message.reply(`Halo kak ${user.id.user}`)
+    }else if(message.body === "!button"){
+        let button = new Buttons('button body', [{body: 'bt1'}, {body: 'bt2'}])
+        client.sendMessage(message.from, button)
+    }
+})
+
+
+var today = new Date()
+var now = today.toLocaleString()
+
+io.on('connection', (socket) => {
+    socket.emit('message', `${now} IO connected`)
+
+    client.on('qr', qr => {
+        socket.emit('new-qr', qr)
+        // qrcode.toDataURL(qr, (err, url) => {
+        //     socket.emit('qr', url)
+        //     socket.emit('message', `${now} QR code recieved`)
+        // })
+    })
+
+    client.on('ready', ()=>{
+        socket.emit('message', `${now} Whatsapp is ready`)
+        socket.emit('ready', true);
+    })
+
+    client.on('authenticated', (session) => {
+        socket.emit('message', `${now} whatsapp is authenticated`)
+        socket.emit('isAuth', true)
+
+    })
+
+    // client.on('message_create', async message=>{
+        // let user = await message.getContact()
+        // socket.emit("message", `Recieved message from ${user.id.user} : "${message.body}"`)
+        // let body = {
+            // "phone": user.id.user,
+            // "message": message.body,
+            // "note": `Recieved message from ${user.id.user} : "${message.body}"`
+        // }
+        // socket.emit("waMessage", body )
+// 
+    // })
+
+    client.on('message', async message=>{
+        let user = await message.getContact()
+        // socket.emit("message", `Recieved message from ${user.id.user} : "${message.body}"`)
+        // let body = {
+            // "phone": user.id.user,
+            // "message": message.body,
+            // "note": `Recieved message from ${user.id.user} : "${message.body}"`
+        // }
+        // socket.emit("waMessage", body )
+		let isStatus = await message.isStatus
+        socket.emit("message", `Recieved message from ${user.id.user} is status ${isStatus} : "${message.body}"`)
+		if(isStatus === false){
+	        let body = {
+	            "phone": user.name ? user.name : user.id.user,
+	            "message": message.body,
+                "note": `Recieved message from ${user.name? user.name : user.id.user}  is status ${isStatus}: "${message.body}"`
+
+	        }
+	        socket.emit("waMessage", body )
+		}
+
+    })
+
+
+    client.on('auth_failure', (session)=>{
+        socket.emit('message', `${now} Auth failure, restarting ....`)
+    })
+
+    client.on('disconnected', ()=> {
+        socket.emit('message', `${now} Disconnected`)
+        client.destroy()
+        client.initialize()
+    })
+
+    socket.on('disconnect-btn', (msg) =>{
+        console.log(`btn : ${msg}`)
+        client.logout()
+    })
+
+})
+
+
+app.post('/check-number', async (req, res) =>{
+    const phone = req.body.phone
+    let result =await client.isRegisteredUser(phone)
+    // let contact = new Contact({id})
+
+    res.status(200).json({
+        error: false,
+        data:{
+            phone: phone,
+            message: result ? "Your number on Whatsapp " : "Not Whatsapp Number",
+            isWa: result
+        }
+    })
+})
+
+app.post('/send', async (req, res) =>{
+    try{
+        const phone = req.body.phone + "@c.us"
+        const message = req.body.message
+        const checkPhone = await client.isRegisteredUser(phone)
+
+        if(checkPhone === false){
+            return res.status(200).json({
+                error: true,
+                data:{
+                    message: "Not Whatsapp Number",
+                    isWa: false,
+                }
+            })
+        }
+
+        client.sendMessage(phone, message)
+            .then(response=>{
+                req.app.io.emit('message-send', 'Message Send Successfully')
+                res.status(200).json({
+                    error: false,
+                    data:{
+                        message: 'Pesan terkirim',
+                        meta: response
+                    }
+                })
+
+            })
+            .catch(err=>{
+                res.status(200).json({
+                    error:true,
+                    data:{
+                        message: "Error",
+                        meta: err
+                    }
+                })
+
+                console.log(err)
+            })
+    }catch(catchErr){
+        res.status(200).json({
+            error: true,
+            data:{
+                message: "error",
+                meta: catchErr
+            }
+        })
+    }
+    
+})
+
+server.listen(PORT, ()=>{
+    console.log("App Listen Port", PORT);
+})
