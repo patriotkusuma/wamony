@@ -385,7 +385,7 @@ app.post('/send', async (req, res) => {
                     error: true,
                     data: {
                         message: "Error saat mengirim pesan",
-                        meta: err
+                        meta: err.message
                     }
                 });
             });
