@@ -1,3 +1,4 @@
+require('dotenv').config()
 const { Client, LocalAuth, Buttons } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const fs = require('fs');
@@ -11,8 +12,9 @@ const {Queue} = require('bullmq')
 const Redis = require('ioredis')
 const fsPromises = require('fs/promises')
 
-const WEBHOOK_LOG_FILE = path.join(__dirname, 'logs/webhook-laravel.log');
-const CHAT_LOG_FILE = path.join(__dirname, 'logs/whatsapp_message.log')
+const WEBHOOK_LOG_FILE = path.join(__dirname, 'logs','webhook-laravel.log');
+const CHAT_LOG_FILE = path.join(__dirname, 'logs','whatsapp_message.log')
+const LOGS_DIR = path.join(__dirname, 'logs')
 
 // Konfig redis
 // const redisConnection = new Redis({
@@ -37,6 +39,19 @@ if (fs.existsSync(SESSION_FILE_PATH)) {
     sessionCfg = require(SESSION_FILE_PATH);
 }
 
+
+// check the log file
+(async () => {
+    try{
+        await ensureDirectoryExists(LOGS_DIR)
+        await ensureFileExists(WEBHOOK_LOG_FILE)
+        await ensureFileExists(CHAT_LOG_FILE)
+        console.log(`[${new Date().toLocaleString()}] - All necessary file are ready.`)
+    }catch(error){
+        console.error(`[${new Date().toLocaleString()}] - Failed to create ensure directory `, error)
+        throw error
+    }
+})
 const app = express();
 const server = http.createServer(app);
 const io = socketIO(server, {
@@ -119,6 +134,12 @@ client.on('disconnected', (reason) => {
 client.on('message', async message => {
     // Abaikan pesan yang dikirim oleh bot itu sendiri (untuk mencegah loop balasan)
     if (message.fromMe) {
+        try{
+            console.log(`[${new Date().toLocaleString()}] simpan whatsapp ke laravel`)
+            await saveMessageToLaravel(message)
+        }catch(error){
+            console.error(`[${new Date().toLocaleString()}] Gagal menyimpan ke laravel`, error.message)
+        }
         return;
     }
 
@@ -146,7 +167,7 @@ client.on('message', async message => {
             return 
         }
 
-        // await saveMessageToLaravel(message,media,filename,media.mimetype)
+        await saveMessageToLaravel(message,media,filename,media.mimetype)
         try {
             // const job = await predictionQueue.add(
             //     'processImage',
@@ -210,6 +231,10 @@ client.on('message', async message => {
                     console.error(`[${new Date().toLocaleString()}] ❌ Gagal webhook Laravel untuk ${senderNumber.replace('@c.us', '')}, nominal: ${paymentAmount}. Error:`, error.message);
                     await message.reply(`Baik kak, terima kasih, pembayaran telah kami terima 🙏 \n\n _* pesan ini dibalas oleh *ai harmony laundry*_`);
                     
+                    // if(predictedClass === "BUKAN_TF"){
+                    //     console.log(`[${new Date().toLocaleString()}] - Prediction Class : ${predictedClass}`)
+                    //     return
+                    // }
                     // Kirim pesan ke admin sebagai fallback
                     await client.sendMessage(ADMIN_NUMBER, media, {
                         caption:
@@ -264,12 +289,12 @@ client.on('message', async message => {
     else if (message.body && message.body.toLowerCase() === '!start') {
         await message.reply('Halo! Kirimkan gambar bukti pembayaran untuk saya deteksi. 😊');
     } else if (message.body && !message.isStatus) {
-        // try{
-        //     console.log(`[${new Date().toLocaleString()}] simpan whatsapp ke laravel`)
-        //     await saveMessageToLaravel(message)
-        // }catch(error){
-        //     console.error(`[${new Date().toLocaleString()}] Gagal menyimpan ke laravel`, error.message)
-        // }
+        try{
+            console.log(`[${new Date().toLocaleString()}] simpan whatsapp ke laravel`)
+            await saveMessageToLaravel(message)
+        }catch(error){
+            console.error(`[${new Date().toLocaleString()}] Gagal menyimpan ke laravel`, error.message)
+        }
         console.log(`[${new Date().toLocaleString()}] Menerima pesan teks dari ${senderNumber}: "${message.body}". Tidak memproses otomatis.`);
     }
 });
@@ -511,15 +536,15 @@ async function sendWebhookToLaravel(nomorLocal, nominal, buffer, filename, mimet
 const saveMessageToLaravel = async (message,media=null,filename=null, mimetype=null) => {
     try{
         const formData = new FormData()
-        formData.append('message_id', message.id)
+        formData.append('message_id', message.id?._serialized || "unkown_id")
         formData.append('from', message.from)
-        formData.append('to', message.to || client.info.wid._serialized)
+        formData.append('to', message.to || client.info.wid?._serialized ||"unknown_id")
         formData.append('message_type', message.type)
         formData.append('message_content', message.body || "")
         formData.append('from_customer', (!message.fromMe).toString())
         formData.append('is_group', (message.isGroupMsg || false).toString())
         formData.append('timestamp', new Date().toISOString())
-        
+        console.log(formData)
         if(media && filename && mimetype) {
             const buffer = Buffer.from(media.data, 'base64')
             formData.append('media', buffer, {
@@ -528,7 +553,7 @@ const saveMessageToLaravel = async (message,media=null,filename=null, mimetype=n
             })
         }
 
-        await axios.post(`https://api.harmonylaundry.my.id/whatsapp/webhook`, formData, {
+        const res = await axios.post(`https://api.harmonylaundry.my.id/whatsapp/webhook`, formData, {
             headers: {
                 ...formData.getHeaders(),
                 'Authorization' : `Bearer ${LARAVEL_BEARER_TOKEN}`
@@ -536,15 +561,37 @@ const saveMessageToLaravel = async (message,media=null,filename=null, mimetype=n
             timeout: 15000
         })
 
+        console.log(res?.data)
         console.log(`[${new Date().toLocaleDateString()} ✅ pesan whatsapp berhasil disimpan ke laravel]`)
         await fsPromises.appendFile(CHAT_LOG_FILE, '✅ Pesan whatsapp berhasil disimpan ke laravel')
     }catch(error){
         console.log(`[${new Date().toLocaleDateString()} ❌ pesan whatsapp gagal disimpan ]`, error.response?.data || error.message)
-        await fsPromises.appendFile(CHAT_LOG_FILE, '❌ Pesan whatsapp gagal disimpan ke laravel ', error.response?.data || error.message)
+        await fsPromises.appendFile(CHAT_LOG_FILE, `[${new Date().toLocaleString()}] - ❌ Pesan whatsapp gagal disimpan ke laravel  \n`)
+    }
+}
+
+async function ensureDirectoryExists(dirPath){
+    try{
+        await fsPromises.mkdir(dirPath, {recursive:true})
+        console.log(`[${new Date().toLocaleString()}] - Directory ${dirPath} created or already exists`)
+    }catch(error){
+        if(error.code !== 'EXISTS'){
+            console.error(`[${new Date().toLocaleString()}] - Error creating directory ${dirPath}`, error.message)
+            throw error
+        }
+    }
+}
+
+async function ensureFileExists(filePath){
+    try{
+        await fsPromises.appendFile(filePath, '')
+    }catch(error){
+        console.error(`[${new Date().toLocaleString()}] - Error ensuring file exists ${filePath}`, error)
+        throw error
     }
 }
 
 // Mulai server Express/Socket.IO
 server.listen(PORT, () => {
-    console.log(`App berjalan di Port ${PORT}`);
+    console.log(`[${new Date().toLocaleString()}] - App berjalan di Port ${PORT}`);
 });

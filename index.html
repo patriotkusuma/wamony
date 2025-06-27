@@ -35,7 +35,9 @@
             <div class="spinner-border" role="status">
               <span class="visually-hidden">Loading...</span>
             </div>
-            <div class="new-qr"></div>
+            <div class="new-qr" >
+              <img id="qr-image" src="" alt="QR Code"/>
+            </div>
             <div class="text-start">
 
               
@@ -98,14 +100,18 @@
             socket.on('new-qr', (qr) =>{
               if(qr != ""){
                 $('.spinner-border').hide()
+                $('#qr-image').attr('src', qr)
+                $('#qr-image').show()
               }else{
                 $('.spinner-border').show()
+                $('#qr-image').hide()
               }
               $('#check').hide()
-              $('.new-qr').empty()
-              $('.new-qr').qrcode({
-                text:qr,
-              })
+              // $('.new-qr').empty()
+              // $('.new-qr').qrcode({
+                // text:qr,
+              // })
+              $('.new-qr').show()
             })
 
             socket.on('isAuth', (msg) => {
