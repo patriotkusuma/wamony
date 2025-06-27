@@ -364,9 +364,18 @@ app.post('/send', async (req, res) => {
                 req.app.io.emit('message-send', 'Pesan Berhasil Dikirim');
                 res.status(200).json({
                     error: false,
-                    data: {
+                     data: {
                         message: 'Pesan terkirim',
-                        meta: response
+                        // Hanya kirim properti yang pasti tersedia dan tidak akan menyebabkan error
+                        // Misalnya, id yang diserialisasi (dengan optional chaining) jika benar-benar dibutuhkan
+                        // Atau, cukup properti dasar seperti 'from', 'to', 'body'
+                        meta: {
+                            id: response.id?._serialized, // Akses dengan optional chaining
+                            from: response.from,
+                            to: response.to,
+                            type: response.type,
+                            body: response.body
+                        }
                     }
                 });
             })
