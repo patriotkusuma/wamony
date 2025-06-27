@@ -134,12 +134,12 @@ client.on('disconnected', (reason) => {
 client.on('message', async message => {
     // Abaikan pesan yang dikirim oleh bot itu sendiri (untuk mencegah loop balasan)
     if (message.fromMe) {
-        try{
-            console.log(`[${new Date().toLocaleString()}] simpan whatsapp ke laravel`)
-            await saveMessageToLaravel(message)
-        }catch(error){
-            console.error(`[${new Date().toLocaleString()}] Gagal menyimpan ke laravel`, error.message)
-        }
+        // try{
+        //     console.log(`[${new Date().toLocaleString()}] simpan whatsapp ke laravel`)
+        //     await saveMessageToLaravel(message)
+        // }catch(error){
+        //     console.error(`[${new Date().toLocaleString()}] Gagal menyimpan ke laravel`, error.message)
+        // }
         return;
     }
 
