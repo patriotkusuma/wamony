@@ -244,7 +244,7 @@ client.on('message', async message => {
                             `Nominal Terdeteksi: *${paymentAmount ? `Rp ${paymentAmount.toLocaleString('id-ID')}` : 'Tidak Terdeteksi'}*\n` +
                             `Teks OCR Awal:\n${ocrResult.substring(0, 300)}${ocrResult.length > 300 ? '...' : ''}\n\n` +
                             `*Gagal menyimpan ke Laravel. Mohon periksa dan balas pelanggan secara manual.*`,
-                        quotedMessageId: message.id._serialized
+                        quotedMessageId: message.id?._serialized
                     });
                 }
             } else {
@@ -261,7 +261,7 @@ client.on('message', async message => {
                         `Nominal Terdeteksi: *${paymentAmount ? `Rp ${paymentAmount.toLocaleString('id-ID')}` : 'Tidak Terdeteksi'}*\n` +
                         `Teks OCR Awal:\n${ocrResult.substring(0, 300)}${ocrResult.length > 300 ? '...' : ''}\n\n` +
                         `*Gambar ini tidak dikenali secara pasti oleh AI atau bukan bukti pembayaran.* Mohon periksa dan balas pelanggan secara manual.`,
-                    quotedMessageId: message.id._serialized // <<< Ini akan membuat pesan admin me-reply ke pesan pelanggan
+                    quotedMessageId: message.id?._serialized // <<< Ini akan membuat pesan admin me-reply ke pesan pelanggan
                 });
                 console.log(`[${new Date().toLocaleString()}] Notifikasi dikirim ke admin ${ADMIN_NUMBER}, mereply pesan asli.`);
             }
@@ -403,52 +403,52 @@ app.post('/send', async (req, res) => {
 });
 
 // ... di dekat bagian atas main.js setelah app = express();
-app.post('/whatsapp_callback', async (req, res) => {
-    const { senderNumber, messageId, predictedClass, confidence, paymentAmount, ocrResult, status } = req.body;
-    console.log(`[${new Date().toLocaleString()}] Menerima callback dari worker Python untuk ${senderNumber}`);
+// app.post('/whatsapp_callback', async (req, res) => {
+//     const { senderNumber, messageId, predictedClass, confidence, paymentAmount, ocrResult, status } = req.body;
+//     console.log(`[${new Date().toLocaleString()}] Menerima callback dari worker Python untuk ${senderNumber}`);
 
-    const confidenceThreshold = 0.7;
-    const isConfidentlyRecognizedPayment = confidence > confidenceThreshold && paymentAmount !== null;
+//     const confidenceThreshold = 0.7;
+//     const isConfidentlyRecognizedPayment = confidence > confidenceThreshold && paymentAmount !== null;
 
-    try {
-        // Dapatkan chat berdasarkan senderNumber (atau messageId jika lebih spesifik)
-        const chat = await client.getChatById(senderNumber);
-        if (!chat) {
-            console.error(`[${new Date().toLocaleString()}] Chat tidak ditemukan untuk ${senderNumber}`);
-            return res.status(404).json({ message: "Chat not found" });
-        }
+//     try {
+//         // Dapatkan chat berdasarkan senderNumber (atau messageId jika lebih spesifik)
+//         const chat = await client.getChatById(senderNumber);
+//         if (!chat) {
+//             console.error(`[${new Date().toLocaleString()}] Chat tidak ditemukan untuk ${senderNumber}`);
+//             return res.status(404).json({ message: "Chat not found" });
+//         }
 
-        if (status === 'success' && isConfidentlyRecognizedPayment) {
-            // Balas pesan sukses
-            await client.sendMessage(senderNumber, `Baik kak, terima kasih, pembayaran telah kami terima 🙏 \n\n_* pesan ini dibalas oleh *ai harmony laundry*_`, {
-                quotedMessageId: messageId // Membalas pesan asli
-            });
-            console.log(`[${new Date().toLocaleString()}] ✔️ Pembayaran valid dari ${senderNumber}. Pesan singkat dikirim ke pelanggan.`);
-        } else {
-            console.warn(`[${new Date().toLocaleString()}] ⚠️ Gambar dari ${senderNumber} TIDAK DIKENALI SECARA PASTI (atau bukan bukti pembayaran).`);
-            console.warn(`   Detail: Prediksi: ${predictedClass}, Confidence: ${confidence}, Nominal: ${paymentAmount}`);
+//         if (status === 'success' && isConfidentlyRecognizedPayment) {
+//             // Balas pesan sukses
+//             await client.sendMessage(senderNumber, `Baik kak, terima kasih, pembayaran telah kami terima 🙏 \n\n_* pesan ini dibalas oleh *ai harmony laundry*_`, {
+//                 quotedMessageId: messageId // Membalas pesan asli
+//             });
+//             console.log(`[${new Date().toLocaleString()}] ✔️ Pembayaran valid dari ${senderNumber}. Pesan singkat dikirim ke pelanggan.`);
+//         } else {
+//             console.warn(`[${new Date().toLocaleString()}] ⚠️ Gambar dari ${senderNumber} TIDAK DIKENALI SECARA PASTI (atau bukan bukti pembayaran).`);
+//             console.warn(`   Detail: Prediksi: ${predictedClass}, Confidence: ${confidence}, Nominal: ${paymentAmount}`);
 
-            // Kirim notifikasi ke Admin
-            const mediaToSendToAdmin = await client.getMessageById(messageId).then(m => m.downloadMedia()).catch(() => null);
+//             // Kirim notifikasi ke Admin
+//             const mediaToSendToAdmin = await client.getMessageById(messageId).then(m => m.downloadMedia()).catch(() => null);
 
-            await client.sendMessage(ADMIN_NUMBER, mediaToSendToAdmin, {
-                caption:
-                    `🚨 *PERLU TINJAUAN MANUAL!* 🚨\n` +
-                    `Pesan dari: ${senderNumber.replace('@c.us', '')}\n` +
-                    `Prediksi Bot: *${predictedClass}* (Conf: ${(confidence * 100).toFixed(2)}%)\n` +
-                    `Nominal Terdeteksi: *${paymentAmount ? `Rp ${paymentAmount.toLocaleString('id-ID')}` : 'Tidak Terdeteksi'}*\n` +
-                    `Teks OCR Awal:\n${ocrResult.substring(0, 300)}${ocrResult.length > 300 ? '...' : ''}\n\n` +
-                    `*Gambar ini tidak dikenali secara pasti oleh AI atau bukan bukti pembayaran.* Mohon periksa dan balas pelanggan secara manual.`,
-                quotedMessageId: messageId // Ini akan membuat pesan admin me-reply ke pesan pelanggan
-            });
-            console.log(`[${new Date().toLocaleString()}] Notifikasi dikirim ke admin ${ADMIN_NUMBER}, mereply pesan asli.`);
-        }
-        res.status(200).json({ message: "Callback processed" });
-    } catch (error) {
-        console.error(`[${new Date().toLocaleString()}] Error processing WhatsApp callback:`, error);
-        res.status(500).json({ message: "Internal server error" });
-    }
-});
+//             await client.sendMessage(ADMIN_NUMBER, mediaToSendToAdmin, {
+//                 caption:
+//                     `🚨 *PERLU TINJAUAN MANUAL!* 🚨\n` +
+//                     `Pesan dari: ${senderNumber.replace('@c.us', '')}\n` +
+//                     `Prediksi Bot: *${predictedClass}* (Conf: ${(confidence * 100).toFixed(2)}%)\n` +
+//                     `Nominal Terdeteksi: *${paymentAmount ? `Rp ${paymentAmount.toLocaleString('id-ID')}` : 'Tidak Terdeteksi'}*\n` +
+//                     `Teks OCR Awal:\n${ocrResult.substring(0, 300)}${ocrResult.length > 300 ? '...' : ''}\n\n` +
+//                     `*Gambar ini tidak dikenali secara pasti oleh AI atau bukan bukti pembayaran.* Mohon periksa dan balas pelanggan secara manual.`,
+//                 quotedMessageId: messageId // Ini akan membuat pesan admin me-reply ke pesan pelanggan
+//             });
+//             console.log(`[${new Date().toLocaleString()}] Notifikasi dikirim ke admin ${ADMIN_NUMBER}, mereply pesan asli.`);
+//         }
+//         res.status(200).json({ message: "Callback processed" });
+//     } catch (error) {
+//         console.error(`[${new Date().toLocaleString()}] Error processing WhatsApp callback:`, error);
+//         res.status(500).json({ message: "Internal server error" });
+//     }
+// });
 
 function convertWaNumberToLocal(waNumber) {
     if (waNumber.endsWith('@c.us')) {
